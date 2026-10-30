@@ -1,0 +1,3 @@
+# Authentication
+
+Scrypt password hashing, platform and College Admin login, invite-based account creation, opaque session tokens, session expiry/revocation, active college selection, and secure cookie options are implemented. Session reads and mutations run in transactions with a token-hash-local GUC; forced RLS limits each session transaction to its token. User reads are RLS-limited to a transaction-local email, current user, or presented session; the runtime role has column-scoped password-hash access for password verification, but no route returns it. Public platform signup, password reset, email delivery/verification, and token rotation are not implemented. Mutations use Next.js Server Actions; keep the deployment's host/origin protections enabled.

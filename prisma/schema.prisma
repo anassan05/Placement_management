@@ -1,0 +1,386 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MembershipRole {
+  COLLEGE_ADMIN
+  PLACEMENT_OFFICER
+  COORDINATOR
+  HOD
+  STUDENT
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum StudentVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum DriveStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  CANCELLED
+}
+
+enum RegistrationMode {
+  IN_APP
+  EXTERNAL_LINK
+  INFO_ONLY
+}
+
+enum RegistrationStatus {
+  REGISTERED
+  WITHDRAWN
+}
+
+enum CollegeApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum CollegeOnboardingState {
+  NOT_STARTED
+  INVITATION_PENDING
+  ADMIN_ACTIVATED
+}
+
+model College {
+  id              String                 @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String                 @unique
+  code            String                 @unique
+  normalizedName  String?                @unique
+  shortName       String?
+  websiteUrl      String?
+  contactEmail    String?
+  contactPhone    String?
+  state           String?
+  district        String?
+  address         String?
+  onboardingState CollegeOnboardingState @default(ADMIN_ACTIVATED)
+  isActive        Boolean                @default(true)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  domains          CollegeDomain[]
+  memberships      Membership[]
+  students         StudentProfile[]
+  companies        Company[]
+  drives           PlacementDrive[]
+  registrations    Registration[]
+  auditLogs        AuditLog[]
+  sessions         Session[]
+  applications     CollegeApplication[]
+  adminInvitations CollegeAdminInvitation[]
+}
+
+model CollegeDomain {
+  id         String    @id @default(uuid()) @db.Uuid
+  collegeId  String    @db.Uuid
+  hostname   String    @unique
+  isPrimary  Boolean   @default(false)
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  college College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  @@index([collegeId])
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String?
+  displayName     String
+  emailVerifiedAt DateTime?
+  isPlatformAdmin Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships                 Membership[]
+  sessions                    Session[]
+  reviewedCollegeApplications CollegeApplication[]     @relation("ApplicationReviewer")
+  platformAuditEvents         PlatformAuditLog[]
+  issuedAdminInvitations      CollegeAdminInvitation[] @relation("InvitationIssuer")
+  acceptedAdminInvitations    CollegeAdminInvitation[] @relation("InvitationAcceptor")
+}
+
+model CollegeApplication {
+  id                           String                   @id @default(uuid()) @db.Uuid
+  applicationRef               String                   @unique
+  collegeName                  String
+  shortName                    String
+  websiteUrl                   String?
+  contactEmail                 String
+  contactEmailNormalized       String
+  contactPhone                 String
+  state                        String
+  district                     String
+  address                      String
+  administratorName            String
+  administratorEmail           String
+  administratorEmailNormalized String
+  message                      String?
+  submissionKey                String?                  @unique
+  status                       CollegeApplicationStatus @default(PENDING)
+  onboardingState              CollegeOnboardingState?
+  rejectionReason              String?
+  reviewedByUserId             String?                  @db.Uuid
+  reviewedAt                   DateTime?
+  collegeId                    String?                  @unique @db.Uuid
+  createdAt                    DateTime                 @default(now())
+  updatedAt                    DateTime                 @updatedAt
+
+  reviewedBy User?                   @relation("ApplicationReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  college    College?                @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  invitation CollegeAdminInvitation?
+
+  @@index([status, createdAt])
+  @@index([onboardingState, createdAt])
+  @@index([contactEmailNormalized])
+}
+
+model CollegeAdminInvitation {
+  id               String         @id @default(uuid()) @db.Uuid
+  applicationId    String         @unique @db.Uuid
+  collegeId        String         @db.Uuid
+  email            String
+  emailNormalized  String
+  tokenHash        String         @unique
+  role             MembershipRole @default(COLLEGE_ADMIN)
+  issuedByUserId   String         @db.Uuid
+  acceptedByUserId String?        @db.Uuid
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+
+  application CollegeApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  college     College            @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  issuedBy    User               @relation("InvitationIssuer", fields: [issuedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy  User?              @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([collegeId, createdAt])
+  @@index([emailNormalized, expiresAt])
+}
+
+model PlatformAuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String   @db.Uuid
+  action      String
+  entityType  String
+  entityId    String
+  summary     String
+  createdAt   DateTime @default(now())
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model RateLimitBucket {
+  keyHash         String   @id @db.VarChar(64)
+  windowStartedAt DateTime
+  attempts        Int
+}
+
+model Membership {
+  id        String           @id @default(uuid()) @db.Uuid
+  collegeId String           @db.Uuid
+  userId    String           @db.Uuid
+  role      MembershipRole
+  status    MembershipStatus @default(INVITED)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  college               College                @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student               StudentProfile?
+  departmentAssignments MembershipDepartment[]
+
+  @@unique([collegeId, userId])
+  @@unique([id, collegeId])
+  @@index([userId, status])
+  @@index([collegeId, role, status])
+}
+
+model Session {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @db.Uuid
+  activeCollegeId String?   @db.Uuid
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  lastSeenAt      DateTime?
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeCollege College? @relation(fields: [activeCollegeId], references: [id], onDelete: SetNull)
+
+  @@index([activeCollegeId])
+  @@index([userId, expiresAt])
+}
+
+model StudentProfile {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  collegeId          String                    @db.Uuid
+  membershipId       String                    @unique @db.Uuid
+  registerNumber     String
+  fullName           String
+  departmentCode     String
+  batchYear          Int
+  phone              String?
+  dateOfBirth        DateTime?
+  verificationStatus StudentVerificationStatus @default(PENDING)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  college       College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  membership    Membership       @relation(fields: [membershipId, collegeId], references: [id, collegeId], onDelete: Cascade)
+  academics     AcademicRecord[]
+  registrations Registration[]
+
+  @@unique([collegeId, registerNumber])
+  @@unique([id, collegeId])
+  @@unique([membershipId, collegeId])
+  @@index([collegeId, departmentCode, batchYear])
+  @@index([collegeId, verificationStatus])
+}
+
+model MembershipDepartment {
+  membershipId   String   @db.Uuid
+  collegeId      String   @db.Uuid
+  departmentCode String
+  createdAt      DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId, collegeId], references: [id, collegeId], onDelete: Cascade)
+
+  @@id([membershipId, departmentCode])
+  @@index([collegeId, departmentCode])
+}
+
+model AcademicRecord {
+  id                String    @id @default(uuid()) @db.Uuid
+  studentId         String    @db.Uuid
+  cgpa              Decimal?  @db.Decimal(4, 2)
+  tenthPercentage   Decimal?  @db.Decimal(5, 2)
+  twelfthPercentage Decimal?  @db.Decimal(5, 2)
+  standingArrears   Int?
+  historyOfArrears  Boolean?
+  effectiveFrom     DateTime  @default(now())
+  verifiedByUserId  String?   @db.Uuid
+  verifiedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, effectiveFrom])
+}
+
+model Company {
+  id        String   @id @default(uuid()) @db.Uuid
+  collegeId String   @db.Uuid
+  name      String
+  website   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  college College          @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  drives  PlacementDrive[]
+
+  @@unique([collegeId, name])
+  @@unique([id, collegeId])
+  @@index([collegeId])
+}
+
+model PlacementDrive {
+  id               String           @id @default(uuid()) @db.Uuid
+  collegeId        String           @db.Uuid
+  companyId        String           @db.Uuid
+  title            String
+  jobRole          String
+  description      String?
+  packageText      String?
+  status           DriveStatus      @default(DRAFT)
+  registrationMode RegistrationMode @default(IN_APP)
+  registrationUrl  String?
+  deadlineAt       DateTime?
+  publishedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  college       College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  company       Company        @relation(fields: [companyId, collegeId], references: [id, collegeId], onDelete: Restrict)
+  rules         DriveRule[]
+  registrations Registration[]
+
+  @@unique([id, collegeId])
+  @@index([collegeId, status, deadlineAt])
+  @@index([companyId])
+}
+
+model DriveRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  driveId     String   @db.Uuid
+  ruleType    String
+  operator    String
+  value       Json
+  isMandatory Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  drive PlacementDrive @relation(fields: [driveId], references: [id], onDelete: Cascade)
+
+  @@index([driveId])
+}
+
+model Registration {
+  id            String             @id @default(uuid()) @db.Uuid
+  collegeId     String             @db.Uuid
+  driveId       String             @db.Uuid
+  studentId     String             @db.Uuid
+  status        RegistrationStatus @default(REGISTERED)
+  method        RegistrationMode
+  submittedData Json?
+  version       Int                @default(1)
+  registeredAt  DateTime           @default(now())
+  withdrawnAt   DateTime?
+
+  college College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  drive   PlacementDrive @relation(fields: [driveId, collegeId], references: [id, collegeId], onDelete: Cascade)
+  student StudentProfile @relation(fields: [studentId, collegeId], references: [id, collegeId], onDelete: Cascade)
+
+  @@unique([driveId, studentId])
+  @@index([collegeId, driveId, status])
+  @@index([studentId, registeredAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  collegeId   String   @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  college College @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  @@index([collegeId, createdAt])
+  @@index([actorUserId, createdAt])
+}

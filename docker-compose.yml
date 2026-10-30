@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: campusconnect-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: campusconnect
+    ports:
+      - "5432:5432"
+    volumes:
+      - campusconnect_pgdata:/var/lib/postgresql/data
+      - ./docker/init-app-role.sql:/docker-entrypoint-initdb.d/10-app-role.sql:ro
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/20-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d campusconnect"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  campusconnect_pgdata:
