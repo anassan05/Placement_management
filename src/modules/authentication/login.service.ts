@@ -42,7 +42,7 @@ export async function authenticateCollegeAdmin(email: string, password: string) 
   const memberships = await db.$transaction(async (transaction) => {
     await transaction.$executeRaw`SELECT set_config('app.current_user_id', ${user.id}, true)`;
     const rows = await transaction.membership.findMany({
-      where: { userId: user.id, role: MembershipRole.COLLEGE_ADMIN, status: "ACTIVE" },
+      where: { userId: user.id, role: { in: [MembershipRole.COLLEGE_ADMIN, MembershipRole.PLACEMENT_OFFICER, MembershipRole.COORDINATOR] }, status: "ACTIVE" },
       select: { collegeId: true }, take: 20
     });
     const active: string[] = [];

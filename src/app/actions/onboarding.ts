@@ -6,6 +6,7 @@ import { getSessionCookieOptions } from "@/modules/authentication/session";
 import { authenticateCollegeAdmin, authenticatePlatformAdmin } from "@/modules/authentication/login.service";
 import { revokeUserSession, setSessionActiveCollege } from "@/modules/authentication/session-store";
 import { resolvePlatformPrincipal } from "@/modules/tenancy/platform-context";
+import { resolveMembershipPrincipal } from "@/modules/tenancy/tenant-context";
 import { submitCollegeApplication } from "@/modules/onboarding/application.service";
 import { acceptCollegeAdminInvitation } from "@/modules/onboarding/invitation.service";
 import { approveCollegeApplication, rejectCollegeApplication, revokeCollegeInvitation, setCollegeActivation } from "@/modules/onboarding/platform.service";
@@ -43,7 +44,9 @@ export async function collegeLoginAction(formData: FormData) {
   try {
     const session = await authenticateCollegeAdmin(formString(formData, "email"), formString(formData, "password"));
     await applyCookie(session);
-    redirect(session.selectionRequired ? "/college/select-college" : "/college/dashboard");
+    if (session.selectionRequired) redirect("/college/select-college");
+    const principal = await resolveMembershipPrincipal(session.token);
+    redirect(workspaceForRole(principal.role));
   } catch (error) {
     if (isRedirect(error)) throw error;
     redirect("/college/login?error=1");
@@ -56,7 +59,8 @@ export async function selectCollegeAction(formData: FormData) {
   if (!token) redirect("/college/login");
   try {
     await setSessionActiveCollege(token, formString(formData, "collegeId"));
-    redirect("/college/dashboard");
+    const principal = await resolveMembershipPrincipal(token);
+    redirect(workspaceForRole(principal.role));
   } catch (error) {
     if (isRedirect(error)) throw error;
     redirect("/college/select-college?error=1");
@@ -122,4 +126,11 @@ async function platformPrincipal() {
 
 function isRedirect(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "digest" in error && String(error.digest).startsWith("NEXT_REDIRECT"));
+}
+
+function workspaceForRole(role: string): string {
+  if (role === "COLLEGE_ADMIN") return "/college/dashboard";
+  if (role === "PLACEMENT_OFFICER") return "/college/placement";
+  if (role === "COORDINATOR") return "/college/coordinator";
+  return "/college/login";
 }

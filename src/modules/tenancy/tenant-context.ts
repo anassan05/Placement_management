@@ -36,7 +36,7 @@ export async function resolveMembershipPrincipal(
     await transaction.$executeRaw`SELECT set_config('app.current_user_id', ${userId}, true)`;
     return transaction.membership.findUnique({
       where: { collegeId_userId: { collegeId: activeCollegeId, userId } },
-      include: { departmentAssignments: { select: { departmentCode: true } }, college: { select: { isActive: true } }, user: { select: { isActive: true } } }
+      include: { departmentAssignments: { select: { department: { select: { shortCode: true } } } }, college: { select: { isActive: true } }, user: { select: { isActive: true } } }
     });
   });
   if (!membership || membership.status !== "ACTIVE" || !membership.college.isActive || !membership.user.isActive) {
@@ -49,7 +49,7 @@ export async function resolveMembershipPrincipal(
     membershipId: membership.id,
     role: membership.role,
     status: "ACTIVE",
-    assignedDepartments: Object.freeze(membership.departmentAssignments.map(({ departmentCode }) => departmentCode))
+    assignedDepartments: Object.freeze(membership.departmentAssignments.map(({ department }) => department.shortCode))
   });
   verifiedMembershipPrincipals.add(principal);
   return principal;

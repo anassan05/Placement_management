@@ -10,7 +10,7 @@ const adminUrl = process.env.TEST_ADMIN_DATABASE_URL;
 const runtimeUrl = process.env.TEST_DATABASE_URL;
 const enabled = Boolean(adminUrl && runtimeUrl);
 const tenantTables = [
-  "College", "CollegeDomain", "Membership", "MembershipDepartment", "StudentProfile",
+  "College", "CollegeDomain", "Membership", "MembershipDepartment", "Department", "StaffInvitation", "StaffInvitationDepartment", "StudentProfile",
   "AcademicRecord", "Company", "PlacementDrive", "DriveRule", "Registration", "AuditLog"
 ] as const;
 
@@ -26,14 +26,18 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
   const adminUserB = uuid("42000000", 16);
   const suspendedUser = uuid("43000000", 17);
   const coordinatorUserA = uuid("44000000", 39);
-  const hodUserB = uuid("45000000", 40);
+  const coordinatorUserB = uuid("45000000", 40);
   const membershipA = uuid("50000000", 5);
   const membershipB = uuid("60000000", 6);
   const adminMembershipA = uuid("61000000", 18);
   const adminMembershipB = uuid("62000000", 19);
   const suspendedMembership = uuid("63000000", 20);
   const coordinatorMembershipA = uuid("64000000", 41);
-  const hodMembershipB = uuid("65000000", 42);
+  const coordinatorMembershipB = uuid("65000000", 42);
+  const departmentA = uuid("67000000", 49);
+  const departmentB = uuid("68000000", 50);
+  const departmentAUnassigned = uuid("69000000", 51);
+  const phase2bEmails = [`phase2b-coord-${suffix}@example.invalid`, `phase2b-officer-${suffix}@example.invalid`];
   const adminMembershipAInB = uuid("66000000", 48);
   const studentA = uuid("70000000", 7);
   const studentB = uuid("80000000", 8);
@@ -59,9 +63,8 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
   let adminSessionA: string;
   let adminSessionB: string;
   let coordinatorSessionA: string;
-  let hodSessionB: string;
   let coordinatorPrincipalA: Extract<Principal, { kind: "membership" }>;
-  let hodPrincipalB: Extract<Principal, { kind: "membership" }>;
+  let coordinatorPrincipalB: Extract<Principal, { kind: "membership" }>;
 
   beforeAll(async () => {
     // Configure Prisma's singleton before its first import. The runtime URL must
@@ -79,11 +82,11 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
       adminSessionA = (await sessionStore.createUserSession(adminUserA, collegeA)).token;
       adminSessionB = (await sessionStore.createUserSession(adminUserB, collegeB)).token;
       coordinatorSessionA = (await sessionStore.createUserSession(coordinatorUserA, collegeA)).token;
-      hodSessionB = (await sessionStore.createUserSession(hodUserB, collegeB)).token;
       principalA = await tenantApi.resolveMembershipPrincipal(adminSessionA);
       principalB = await tenantApi.resolveMembershipPrincipal(adminSessionB);
       coordinatorPrincipalA = await tenantApi.resolveMembershipPrincipal(coordinatorSessionA);
-      hodPrincipalB = await tenantApi.resolveMembershipPrincipal(hodSessionB);
+      const coordinatorSessionB = (await sessionStore.createUserSession(coordinatorUserB, collegeB)).token;
+      coordinatorPrincipalB = await tenantApi.resolveMembershipPrincipal(coordinatorSessionB);
     } catch (error) {
       await cleanupSyntheticFixtures();
       throw error;
@@ -97,7 +100,7 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
         (SELECT count(*)::int FROM "College" WHERE id = ANY($1::uuid[])) AS colleges,
         (SELECT count(*)::int FROM "User" WHERE id = ANY($2::uuid[])) AS users`, [
         [collegeA, collegeB],
-        [studentUserA, studentUserB, adminUserA, adminUserB, suspendedUser, coordinatorUserA, hodUserB]
+        [studentUserA, studentUserB, adminUserA, adminUserB, suspendedUser, coordinatorUserA, coordinatorUserB]
       ]);
       expect(residue.rows[0]).toEqual({ colleges: 0, users: 0 });
     } finally {
@@ -121,11 +124,12 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
 
     const policies = await admin.query(`SELECT tablename, policyname, cmd, qual, with_check
       FROM pg_policies WHERE schemaname='public' AND tablename = ANY($1::text[])`, [tenantTables]);
-    expect(policies.rowCount).toBe(17);
+    expect(policies.rowCount).toBe(22);
     for (const table of tenantTables) {
       const tablePolicies = policies.rows.filter((policy) => policy.tablename === table);
       expect(tablePolicies.length, `${table} has policies`).toBeGreaterThan(0);
-      for (const command of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+      const commands = table === "StaffInvitation" ? ["SELECT", "INSERT", "UPDATE"] : table === "StaffInvitationDepartment" ? ["SELECT", "INSERT"] : ["SELECT", "INSERT", "UPDATE", "DELETE"];
+      for (const command of commands) {
         expect(tablePolicies.some((policy) => policy.cmd === "ALL" || policy.cmd === command), `${table} covers ${command}`).toBe(true);
       }
       for (const policy of tablePolicies.filter((item) => item.cmd === "ALL" || item.cmd === "INSERT" || item.cmd === "UPDATE")) {
@@ -176,6 +180,12 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
       { privilege_type: "SELECT", column_name: "isPlatformAdmin" },
       { privilege_type: "SELECT", column_name: "passwordHash" }
     ]);
+    const limitedColumns = await admin.query(`SELECT table_name, privilege_type, column_name FROM information_schema.column_privileges
+      WHERE table_schema='public' AND grantee='campusconnect_app' AND table_name IN ('StaffInvitation','Department')
+      AND ((table_name='StaffInvitation' AND privilege_type='UPDATE') OR (table_name='Department' AND privilege_type='DELETE'))`);
+    expect(limitedColumns.rows.some((row) => row.table_name === "StaffInvitation" && row.column_name === "role")).toBe(false);
+    expect(limitedColumns.rows.some((row) => row.table_name === "StaffInvitation" && row.column_name === "tokenHash")).toBe(false);
+    expect(limitedColumns.rows.some((row) => row.table_name === "Department" && row.privilege_type === "DELETE")).toBe(false);
     const identity = await admin.query('SELECT email FROM "User" WHERE id=$1', [adminUserA]);
     const scoped = await runtime.connect();
     try {
@@ -199,6 +209,7 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
       expect((await client.query('SELECT id FROM "StudentProfile" ORDER BY id')).rows.map((row) => row.id)).toEqual([studentA]);
       expect((await client.query('SELECT id FROM "Membership" WHERE "collegeId"=$1 OR "collegeId"=$2 ORDER BY id', [collegeA, collegeB])).rows.map((row) => row.id).sort()).toEqual([membershipA, adminMembershipA, suspendedMembership, coordinatorMembershipA].sort());
       expect((await client.query('SELECT "membershipId" FROM "MembershipDepartment" WHERE "collegeId"=$1 OR "collegeId"=$2 ORDER BY "membershipId"', [collegeA, collegeB])).rows.map((row) => row.membershipId).sort()).toEqual([adminMembershipA, coordinatorMembershipA].sort());
+      expect((await client.query('SELECT id FROM "Department" WHERE "collegeId"=$1 OR "collegeId"=$2 ORDER BY id', [collegeA, collegeB])).rows.map((row) => row.id).sort()).toEqual([departmentA, departmentAUnassigned].sort());
       expect((await client.query('SELECT id FROM "StudentProfile" WHERE "collegeId"=$1', [collegeB])).rowCount).toBe(0);
       expect((await client.query('SELECT id FROM "Company" WHERE "collegeId"=$1 OR "collegeId"=$2', [collegeA, collegeB])).rows.map((row) => row.id)).toEqual([companyA]);
       expect((await client.query('SELECT id FROM "PlacementDrive" WHERE "collegeId"=$1 OR "collegeId"=$2', [collegeA, collegeB])).rows.map((row) => row.id)).toEqual([driveA]);
@@ -338,15 +349,80 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
       .rejects.toThrow("active college membership");
   });
 
-  it("loads coordinator and HOD department scopes from persisted assignments", () => {
+  it("loads Coordinator department scopes from persisted assignments", () => {
     expect(coordinatorPrincipalA.role).toBe("COORDINATOR");
     expect(coordinatorPrincipalA.assignedDepartments).toEqual(["CSE"]);
     expect(() => requireDepartmentAccess(coordinatorPrincipalA, "CSE")).not.toThrow();
     expect(() => requireDepartmentAccess(coordinatorPrincipalA, "ECE")).toThrow();
-    expect(hodPrincipalB.role).toBe("HOD");
-    expect(hodPrincipalB.assignedDepartments).toEqual(["ECE"]);
-    expect(() => requireDepartmentAccess(hodPrincipalB, "ECE")).not.toThrow();
-    expect(() => requireDepartmentAccess(hodPrincipalB, "CSE")).toThrow();
+    expect(coordinatorPrincipalB.role).toBe("COORDINATOR");
+    expect(coordinatorPrincipalB.assignedDepartments).toEqual(["ECE"]);
+    expect(() => requireDepartmentAccess(coordinatorPrincipalB, "ECE")).not.toThrow();
+    expect(() => requireDepartmentAccess(coordinatorPrincipalB, "CSE")).toThrow();
+  });
+
+  it("creates, accepts, scopes, revokes, and deactivates staff through the real runtime role", async () => {
+    const staff = await import("../staff/staff.service");
+    const coordEmail = phase2bEmails[0];
+    const invitation = await staff.createStaffInvitation(principalA, {
+      fullName: "Synthetic Phase 2B Coordinator", email: coordEmail, role: "COORDINATOR", departmentIds: [departmentA], message: "Synthetic test invitation"
+    });
+    const token = new URL(invitation.invitationUrl).pathname.split("/").at(-1)!;
+    expect(await staff.getStaffInvitation(token)).toMatchObject({ email: coordEmail, role: "COORDINATOR", collegeId: collegeA });
+
+    const runtimeClient = await runtime.connect();
+    try {
+      await runtimeClient.query("BEGIN");
+      await setTenant(runtimeClient, collegeB);
+      expect((await runtimeClient.query('SELECT id FROM "StaffInvitation"')).rowCount).toBe(0);
+      await runtimeClient.query("COMMIT");
+      await runtimeClient.query("BEGIN");
+      await setTenant(runtimeClient, collegeA);
+      await expect(runtimeClient.query('UPDATE "StaffInvitation" SET role=$1 WHERE "tokenHash"=$2', ["PLACEMENT_OFFICER", hashSessionToken(token)])).rejects.toMatchObject({ code: "42501" });
+      await runtimeClient.query("ROLLBACK");
+    } finally { await runtimeClient.query("ROLLBACK").catch(() => undefined); runtimeClient.release(); }
+
+    const accepted = await staff.acceptStaffInvitation(token, { displayName: "Synthetic Coordinator", password: `Phase2b-${suffix}-Password`, confirmPassword: `Phase2b-${suffix}-Password` });
+    const coordinator = await tenantApi.resolveMembershipPrincipal(accepted.token);
+    expect(coordinator).toMatchObject({ collegeId: collegeA, role: "COORDINATOR", assignedDepartments: ["CSE"] });
+    expect((await staff.listDepartments(coordinator)).map((d) => d.id)).toEqual([departmentA]);
+    expect(() => requireDepartmentAccess(coordinator, "ECE")).toThrow();
+    await expect(staff.createStaffInvitation(coordinator, { fullName: "No", email: "no@example.invalid", role: "PLACEMENT_OFFICER", departmentIds: [] })).rejects.toThrow();
+    await expect(staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentAUnassigned, true)).resolves.toBeUndefined();
+    expect((await staff.listDepartments(coordinator)).map((d) => d.id).sort()).toEqual([departmentA, departmentAUnassigned].sort());
+    await staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentAUnassigned, false);
+    await expect(staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentB, true)).rejects.toThrow();
+    await staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentAUnassigned, true);
+    await staff.setDepartmentActive(principalA, departmentAUnassigned, false);
+    const retained = await tenantApi.withTenantTransaction(principalA, (tx) => tx.membershipDepartment.count({ where: { membershipId: coordinator.membershipId, departmentId: departmentAUnassigned } }));
+    expect(retained).toBe(1);
+    await expect(staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentAUnassigned, true)).rejects.toThrow();
+    await staff.setDepartmentActive(principalA, departmentAUnassigned, true);
+    await staff.setCoordinatorDepartment(principalA, coordinator.membershipId, departmentAUnassigned, false);
+    await expect(staff.acceptStaffInvitation(token, { displayName: "Replay", password: `Phase2b-${suffix}-Password`, confirmPassword: `Phase2b-${suffix}-Password` })).rejects.toThrow();
+    const login = await (await import("../authentication/login.service")).authenticateCollegeAdmin(coordEmail, `Phase2b-${suffix}-Password`);
+    expect((await tenantApi.resolveMembershipPrincipal(login.token)).role).toBe("COORDINATOR");
+    await sessionStore.revokeUserSession(login.token);
+    await staff.setStaffMembershipActive(principalA, coordinator.membershipId, false);
+    await expect(tenantApi.resolveMembershipPrincipal(accepted.token)).rejects.toThrow("active college membership");
+    await staff.setStaffMembershipActive(principalA, coordinator.membershipId, true);
+    await sessionStore.revokeUserSession(accepted.token);
+
+    const officer = await staff.createStaffInvitation(principalA, { fullName: "Synthetic Officer", email: phase2bEmails[1], role: "PLACEMENT_OFFICER", departmentIds: [] });
+    const officerToken = new URL(officer.invitationUrl).pathname.split("/").at(-1)!;
+    const officerId = await admin.query('SELECT id FROM "StaffInvitation" WHERE "tokenHash"=$1', [hashSessionToken(officerToken)]);
+    await staff.revokeStaffInvitation(principalA, officerId.rows[0].id);
+    await expect(staff.acceptStaffInvitation(officerToken, { displayName: "Synthetic Officer", password: `Phase2b-${suffix}-Password`, confirmPassword: `Phase2b-${suffix}-Password` })).rejects.toThrow();
+
+    const concurrent = await staff.createStaffInvitation(principalA, { fullName: "Concurrent Staff", email: `phase2b-concurrent-${suffix}@example.invalid`, role: "PLACEMENT_OFFICER", departmentIds: [] });
+    const concurrentToken = new URL(concurrent.invitationUrl).pathname.split("/").at(-1)!;
+    const results = await Promise.allSettled([
+      staff.acceptStaffInvitation(concurrentToken, { displayName: "Concurrent Staff", password: `Phase2b-${suffix}-Password`, confirmPassword: `Phase2b-${suffix}-Password` }),
+      staff.acceptStaffInvitation(concurrentToken, { displayName: "Concurrent Staff", password: `Phase2b-${suffix}-Password`, confirmPassword: `Phase2b-${suffix}-Password` })
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const concurrentSession = results.find((result): result is PromiseFulfilledResult<{ token: string; expiresAt: Date }> => result.status === "fulfilled")!.value;
+    await sessionStore.revokeUserSession(concurrentSession.token);
   });
 
   it("switches a session only among the same user's verified active memberships", async () => {
@@ -418,8 +494,8 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
        adminUserB, `admin-b-${suffix}@example.invalid`,
        suspendedUser, `suspended-${suffix}@example.invalid`]);
     await admin.query(`INSERT INTO "User" (id,email,"displayName","updatedAt") VALUES
-      ($1,$2,'RLS coordinator A',now()),($3,$4,'RLS HOD B',now())`,
-      [coordinatorUserA, `coord-a-${suffix}@example.invalid`, hodUserB, `hod-b-${suffix}@example.invalid`]);
+      ($1,$2,'RLS coordinator A',now()),($3,$4,'RLS coordinator B',now())`,
+      [coordinatorUserA, `coord-a-${suffix}@example.invalid`, coordinatorUserB, `coord-b-${suffix}@example.invalid`]);
     const storedHash = await admin.query('SELECT "passwordHash" FROM "User" WHERE id=$1', [studentUserA]);
     expect(storedHash.rows[0].passwordHash).not.toBe(syntheticPassword);
     expect(storedHash.rows[0].passwordHash).toMatch(/^scrypt\$32768\$/);
@@ -427,15 +503,17 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
       ($1,$2,$3,'STUDENT','ACTIVE',now()),($4,$5,$6,'STUDENT','ACTIVE',now()),
       ($7,$8,$9,'COLLEGE_ADMIN','ACTIVE',now()),($10,$11,$12,'COLLEGE_ADMIN','ACTIVE',now()),
       ($13,$14,$15,'PLACEMENT_OFFICER','SUSPENDED',now()),
-      ($16,$17,$18,'COORDINATOR','ACTIVE',now()),($19,$20,$21,'HOD','ACTIVE',now()),
+      ($16,$17,$18,'COORDINATOR','ACTIVE',now()),($19,$20,$21,'COORDINATOR','ACTIVE',now()),
       ($22,$23,$24,'PLACEMENT_OFFICER','ACTIVE',now())`,
       [membershipA, collegeA, studentUserA, membershipB, collegeB, studentUserB,
        adminMembershipA, collegeA, adminUserA, adminMembershipB, collegeB, adminUserB,
        suspendedMembership, collegeA, suspendedUser, coordinatorMembershipA, collegeA, coordinatorUserA,
-       hodMembershipB, collegeB, hodUserB, adminMembershipAInB, collegeB, adminUserA]);
-    await admin.query(`INSERT INTO "MembershipDepartment" ("membershipId","collegeId","departmentCode") VALUES
-      ($1,$2,'CSE'),($3,$4,'ECE'),($5,$6,'CSE'),($7,$8,'ECE')`,
-      [adminMembershipA, collegeA, adminMembershipB, collegeB, coordinatorMembershipA, collegeA, hodMembershipB, collegeB]);
+       coordinatorMembershipB, collegeB, coordinatorUserB, adminMembershipAInB, collegeB, adminUserA]);
+    await admin.query(`INSERT INTO "Department" (id,"collegeId",name,"shortCode","updatedAt") VALUES
+      ($1,$2,'Computer Science','CSE',now()),($3,$4,'Electronics','ECE',now()),($5,$6,'Electronics Local','ECE',now())`, [departmentA, collegeA, departmentB, collegeB, departmentAUnassigned, collegeA]);
+    await admin.query(`INSERT INTO "MembershipDepartment" ("membershipId","collegeId","departmentId") VALUES
+      ($1,$2,$9),($3,$4,$10),($5,$6,$9),($7,$8,$10)`,
+      [adminMembershipA, collegeA, adminMembershipB, collegeB, coordinatorMembershipA, collegeA, coordinatorMembershipB, collegeB, departmentA, departmentB]);
     await admin.query(`INSERT INTO "StudentProfile" (id,"collegeId","membershipId","registerNumber","fullName","departmentCode","batchYear","updatedAt") VALUES
       ($1,$2,$3,'RLS-REG-SHARED','RLS Student A','CSE',2027,now()),($4,$5,$6,'RLS-REG-SHARED','RLS Student B','ECE',2027,now())`,
       [studentA, collegeA, membershipA, studentB, collegeB, membershipB]);
@@ -458,8 +536,11 @@ describe.skipIf(!enabled)("PostgreSQL tenant isolation and security (real databa
   }
 
   async function cleanupSyntheticFixtures(): Promise<void> {
+    await admin.query('DELETE FROM "StaffInvitation" WHERE "collegeId" = ANY($1::uuid[])', [[collegeA, collegeB]]);
+    await admin.query('DELETE FROM "User" WHERE email = ANY($1::text[])', [phase2bEmails]);
+    await admin.query('DELETE FROM "User" WHERE email LIKE $1', [`phase2b-concurrent-${suffix}@example.invalid`]);
     await admin.query('DELETE FROM "College" WHERE id = ANY($1::uuid[])', [[collegeA, collegeB]]);
-    await admin.query('DELETE FROM "User" WHERE id = ANY($1::uuid[])', [[studentUserA, studentUserB, adminUserA, adminUserB, suspendedUser, coordinatorUserA, hodUserB]]);
+    await admin.query('DELETE FROM "User" WHERE id = ANY($1::uuid[])', [[studentUserA, studentUserB, adminUserA, adminUserB, suspendedUser, coordinatorUserA, coordinatorUserB]]);
   }
 
   async function removeStaleSyntheticFixtures(): Promise<void> {

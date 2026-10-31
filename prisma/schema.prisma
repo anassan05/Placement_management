@@ -11,6 +11,7 @@ enum MembershipRole {
   COLLEGE_ADMIN
   PLACEMENT_OFFICER
   COORDINATOR
+  // Historical only; new invitations and authorization do not support HOD.
   HOD
   STUDENT
 }
@@ -86,6 +87,8 @@ model College {
   sessions         Session[]
   applications     CollegeApplication[]
   adminInvitations CollegeAdminInvitation[]
+  staffInvitations StaffInvitation[]
+  departments      Department[]
 }
 
 model CollegeDomain {
@@ -118,6 +121,8 @@ model User {
   platformAuditEvents         PlatformAuditLog[]
   issuedAdminInvitations      CollegeAdminInvitation[] @relation("InvitationIssuer")
   acceptedAdminInvitations    CollegeAdminInvitation[] @relation("InvitationAcceptor")
+  issuedStaffInvitations      StaffInvitation[]        @relation("StaffInvitationIssuer")
+  acceptedStaffInvitations    StaffInvitation[]        @relation("StaffInvitationAcceptor")
 }
 
 model CollegeApplication {
@@ -194,6 +199,64 @@ model PlatformAuditLog {
   @@index([entityType, entityId, createdAt])
 }
 
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  collegeId   String   @db.Uuid
+  name        String
+  shortCode   String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  college               College                      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  assignments           MembershipDepartment[]
+  invitationAssignments StaffInvitationDepartment[]
+
+  @@unique([collegeId, name])
+  @@unique([collegeId, shortCode])
+  @@unique([id, collegeId])
+  @@index([collegeId, isActive])
+}
+
+model StaffInvitation {
+  id               String         @id @default(uuid()) @db.Uuid
+  collegeId        String         @db.Uuid
+  fullName         String
+  email            String
+  emailNormalized  String
+  role             MembershipRole
+  message          String?
+  tokenHash        String         @unique
+  issuedByUserId   String         @db.Uuid
+  acceptedByUserId String?        @db.Uuid
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+
+  college    College @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  issuedBy   User    @relation("StaffInvitationIssuer", fields: [issuedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy User?   @relation("StaffInvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+  departments StaffInvitationDepartment[]
+
+  @@index([collegeId, createdAt])
+  @@index([emailNormalized, expiresAt])
+  @@unique([id, collegeId])
+}
+
+model StaffInvitationDepartment {
+  invitationId String @db.Uuid
+  departmentId String @db.Uuid
+  collegeId    String @db.Uuid
+
+  invitation StaffInvitation @relation(fields: [invitationId, collegeId], references: [id, collegeId], onDelete: Cascade)
+  department Department      @relation(fields: [departmentId, collegeId], references: [id, collegeId], onDelete: Restrict)
+
+  @@id([invitationId, departmentId])
+  @@index([collegeId, departmentId])
+}
+
 model RateLimitBucket {
   keyHash         String   @id @db.VarChar(64)
   windowStartedAt DateTime
@@ -263,15 +326,16 @@ model StudentProfile {
 }
 
 model MembershipDepartment {
-  membershipId   String   @db.Uuid
-  collegeId      String   @db.Uuid
-  departmentCode String
-  createdAt      DateTime @default(now())
+  membershipId String   @db.Uuid
+  collegeId    String   @db.Uuid
+  departmentId String   @db.Uuid
+  createdAt    DateTime @default(now())
 
   membership Membership @relation(fields: [membershipId, collegeId], references: [id, collegeId], onDelete: Cascade)
+  department Department @relation(fields: [departmentId, collegeId], references: [id, collegeId], onDelete: Restrict)
 
-  @@id([membershipId, departmentCode])
-  @@index([collegeId, departmentCode])
+  @@id([membershipId, departmentId])
+  @@index([collegeId, departmentId])
 }
 
 model AcademicRecord {

@@ -3,6 +3,8 @@ import { AuthorizationError } from "@/lib/errors";
 
 export type Permission =
   | "college:manage"
+  | "staff:manage"
+  | "departments:manage"
   | "students:read"
   | "students:write"
   | "students:own:read"
@@ -31,7 +33,7 @@ export type Principal =
 
 const rolePermissions: Record<MembershipRole, Permission[]> = {
   COLLEGE_ADMIN: [
-    "college:manage", "students:read", "students:write",
+    "college:manage", "staff:manage", "departments:manage", "students:read", "students:write",
     "drives:read", "drives:write", "registrations:read",
     "registrations:manage", "reports:read"
   ],
@@ -43,7 +45,7 @@ const rolePermissions: Record<MembershipRole, Permission[]> = {
     "students:read", "students:write", "drives:read",
     "registrations:read", "registrations:manage", "reports:read"
   ],
-  HOD: ["students:read", "drives:read", "registrations:read", "reports:read"],
+  HOD: [],
   STUDENT: ["drives:read", "students:own:read", "students:own:write", "registrations:own:read", "registrations:own:create"]
 };
 
@@ -68,7 +70,7 @@ export function requireDepartmentAccess(principal: Principal, departmentCode: st
   }
   if (
     principal.status !== "ACTIVE" ||
-    (["COORDINATOR", "HOD"].includes(principal.role) &&
+    (principal.role === "COORDINATOR" &&
       !principal.assignedDepartments.includes(departmentCode))
   ) {
     throw new AuthorizationError("You do not have access to this department.");

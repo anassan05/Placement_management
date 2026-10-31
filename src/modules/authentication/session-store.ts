@@ -68,7 +68,7 @@ export async function listSessionCollegeChoices(token: string): Promise<Array<{ 
     if (!session || session.expiresAt <= new Date() || !session.user.isActive) return [];
     await transaction.$executeRaw`SELECT set_config('app.current_user_id', ${session.userId}, true)`;
     const memberships = await transaction.membership.findMany({
-      where: { userId: session.userId, role: "COLLEGE_ADMIN", status: "ACTIVE" },
+      where: { userId: session.userId, role: { in: ["COLLEGE_ADMIN", "PLACEMENT_OFFICER", "COORDINATOR"] }, status: "ACTIVE" },
       select: { collegeId: true }, take: 20
     });
     const choices: Array<{ id: string; name: string }> = [];

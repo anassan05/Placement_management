@@ -20,13 +20,17 @@ describe("role permissions", () => {
     expect(hasPermission(root, "college:manage")).toBe(true);
     expect(hasPermission(inactiveRoot, "college:manage")).toBe(false);
     expect(hasPermission(principal(MembershipRole.COLLEGE_ADMIN), "college:manage")).toBe(true);
+    expect(hasPermission(principal(MembershipRole.COLLEGE_ADMIN), "staff:manage")).toBe(true);
+    expect(hasPermission(principal(MembershipRole.COLLEGE_ADMIN), "departments:manage")).toBe(true);
     expect(hasPermission(principal(MembershipRole.COLLEGE_ADMIN), "reports:read")).toBe(true);
     expect(hasPermission(principal(MembershipRole.PLACEMENT_OFFICER), "drives:write")).toBe(true);
     expect(hasPermission(principal(MembershipRole.PLACEMENT_OFFICER), "college:manage")).toBe(false);
+    expect(hasPermission(principal(MembershipRole.PLACEMENT_OFFICER), "staff:manage")).toBe(false);
+    expect(hasPermission(principal(MembershipRole.PLACEMENT_OFFICER), "departments:manage")).toBe(false);
     expect(hasPermission(principal(MembershipRole.COORDINATOR, ["CSE"]), "students:write")).toBe(true);
     expect(hasPermission(principal(MembershipRole.COORDINATOR), "drives:write")).toBe(false);
-    expect(hasPermission(principal(MembershipRole.HOD, ["CSE"]), "reports:read")).toBe(true);
-    expect(hasPermission(principal(MembershipRole.HOD), "college:manage")).toBe(false);
+    expect(hasPermission(principal(MembershipRole.COORDINATOR), "staff:manage")).toBe(false);
+    expect(hasPermission(principal(MembershipRole.COORDINATOR), "departments:manage")).toBe(false);
     expect(hasPermission(principal(MembershipRole.STUDENT), "students:own:write")).toBe(true);
     expect(hasPermission(principal(MembershipRole.STUDENT), "registrations:own:create")).toBe(true);
     expect(hasPermission(principal(MembershipRole.STUDENT), "drives:write")).toBe(false);
@@ -40,13 +44,8 @@ describe("role permissions", () => {
     expect(hasPermission(principal(MembershipRole.STUDENT), "registrations:manage")).toBe(false);
   });
 
-  it("does not allow HODs to manage college settings", () => {
-    expect(hasPermission(principal(MembershipRole.HOD), "college:manage")).toBe(false);
-  });
-
-  it("blocks students from creating placement drives and HODs from changing settings", () => {
+  it("blocks students from creating placement drives", () => {
     expect(() => requirePermission(principal(MembershipRole.STUDENT), "drives:write")).toThrow(AuthorizationError);
-    expect(() => requirePermission(principal(MembershipRole.HOD), "college:manage")).toThrow(AuthorizationError);
   });
 
   it("requires coordinator assignment for department access", () => {
@@ -54,8 +53,7 @@ describe("role permissions", () => {
     expect(() => requireDepartmentAccess(principal(MembershipRole.COORDINATOR, ["CSE"]), "CSE")).not.toThrow();
   });
 
-  it("requires HOD assignment and lets placement officers cover all departments", () => {
-    expect(() => requireDepartmentAccess(principal(MembershipRole.HOD, ["CSE"]), "ECE")).toThrow(AuthorizationError);
+  it("lets placement officers cover college departments", () => {
     expect(() => requireDepartmentAccess(principal(MembershipRole.PLACEMENT_OFFICER), "ECE")).not.toThrow();
   });
 

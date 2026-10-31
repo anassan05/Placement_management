@@ -21,3 +21,10 @@ export async function requireCollegeAdminPage() {
     return principal;
   } catch { redirect("/college/login"); }
 }
+
+export async function requireMembershipPage() {
+  const token = (await cookies()).get(COOKIE)?.value;
+  if (!token) redirect("/college/login");
+  try { return await resolveMembershipPrincipal(token); }
+  catch { redirect("/college/login"); }
+}

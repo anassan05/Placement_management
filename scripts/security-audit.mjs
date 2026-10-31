@@ -8,7 +8,8 @@ const urls = [
 const expectedForced = [
   'AcademicRecord', 'AuditLog', 'College', 'CollegeAdminInvitation', 'CollegeApplication',
   'CollegeDomain', 'Company', 'DriveRule', 'Membership', 'MembershipDepartment',
-  'PlacementDrive', 'PlatformAuditLog', 'RateLimitBucket', 'Registration', 'Session',
+  'Department', 'PlacementDrive', 'PlatformAuditLog', 'RateLimitBucket', 'Registration', 'Session',
+  'StaffInvitation', 'StaffInvitationDepartment',
   'StudentProfile', 'User'
 ];
 
