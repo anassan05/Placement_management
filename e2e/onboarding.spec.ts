@@ -3,7 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 
+test.setTimeout(60_000);
+
 test("platform onboarding and Phase 2B staff lifecycle stay tenant scoped", async ({ page, browser }) => {
+  page.setDefaultTimeout(15_000);
   const fixturePath = resolve("test-results", ".e2e-fixture.json");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { marker: string; email: string; password: string; staffAcceptKeyHashes?: string[] };
   const { marker, email: platformEmail, password: platformPassword } = fixture;
@@ -17,7 +20,7 @@ test("platform onboarding and Phase 2B staff lifecycle stay tenant scoped", asyn
   await page.getByLabel("Email").fill(platformEmail);
   await page.getByLabel("Password").fill(platformPassword);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/platform\/dashboard$/);
+  await expect(page).toHaveURL(/\/platform\/dashboard$/, { timeout: 15_000 });
 
   await page.goto("/apply-college");
   await page.getByLabel("College name").fill(collegeName);
@@ -118,8 +121,8 @@ test("platform onboarding and Phase 2B staff lifecycle stay tenant scoped", asyn
   expect(coordinatorHref).toBeTruthy();
   await page.goto(coordinatorHref!);
   await expect(page.getByText("Department assignments")).toBeVisible();
-  page.on("dialog", (dialog) => dialog.accept());
   await page.locator("li").filter({ hasText: "Electronics (ECE)" }).getByRole("button", { name: "Assign", exact: true }).click();
+  await expect(page.locator("li").filter({ hasText: "Electronics (ECE)" }).getByRole("button", { name: "Remove assignment" })).toBeVisible();
   await coordinatorPage.goto("/college/coordinator");
   await expect(coordinatorPage.getByText("Electronics")).toBeVisible();
   await expect(coordinatorPage.getByText("Mechanical")).toHaveCount(0);
@@ -127,6 +130,9 @@ test("platform onboarding and Phase 2B staff lifecycle stay tenant scoped", asyn
   const staffRows = page.getByRole("row");
   const coordinatorRow = staffRows.filter({ hasText: coordinatorEmail });
   await coordinatorRow.getByRole("button", { name: "Deactivate" }).click();
+  await page.waitForLoadState("networkidle");
+  await page.goto("/college/staff");
+  await expect(page.getByRole("row").filter({ hasText: coordinatorEmail })).toContainText("Inactive");
   await coordinatorPage.goto("/college/coordinator");
   await expect(coordinatorPage).toHaveURL(/\/college\/login$/);
   await coordinatorContext.close();

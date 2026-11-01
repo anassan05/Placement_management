@@ -18,7 +18,7 @@ export const collegeApplicationSchema = z.object({
   administratorEmail: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
   message: z.string().trim().max(2000).transform((value) => value || null),
   companyWebsite: z.string().trim().max(200).optional().default("")
-});
+}).strict();
 
 export const emailSchema = z.string().trim().email().max(254).transform((value) => value.toLowerCase());
 
@@ -26,7 +26,7 @@ export const invitationAcceptanceSchema = z.object({
   email: emailSchema,
   displayName: cleanText(2, 140),
   password: z.string().min(12).max(256)
-});
+}).strict();
 
 export const rejectionReasonSchema = z.string().trim().max(1000).transform((value) => value || null);
 

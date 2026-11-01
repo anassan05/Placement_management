@@ -61,7 +61,7 @@ test("application form remains usable on mobile and renders its error state", as
   const errors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto("/apply-college?error=submit");
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByText("We could not submit this application. Check the form or try again later.")).toBeVisible();
   await expect(page.getByLabel("College name")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);

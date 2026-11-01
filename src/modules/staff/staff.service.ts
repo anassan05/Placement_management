@@ -68,12 +68,12 @@ export async function listStaff(principal: Principal) {
   return withTenantTransaction(principal, async (tx) => {
     const [memberships, invitations] = await Promise.all([
       tx.membership.findMany({ where: { role: { in: [...staffRoles] } }, orderBy: { createdAt: "desc" }, select: {
-        id: true, role: true, status: true, createdAt: true,
+        id: true, userId: true, role: true, status: true, createdAt: true,
         user: { select: { displayName: true, email: true } },
         departmentAssignments: { select: { department: { select: { id: true, name: true, shortCode: true } } } }
       } }),
       tx.staffInvitation.findMany({ orderBy: { createdAt: "desc" }, take: 100, select: {
-        id: true, fullName: true, email: true, role: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true
+        id: true, fullName: true, email: true, role: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true, acceptedByUserId: true
       } })
     ]);
     return { memberships, invitations };
@@ -104,9 +104,11 @@ export async function createStaffInvitation(principal: Principal, raw: unknown):
     const invitation = await tx.staffInvitation.create({ data: {
       id, collegeId: principal.collegeId, fullName: input.fullName, email: input.email, emailNormalized: input.email,
       role: input.role, message: input.message, tokenHash: hashSessionToken(token), issuedByUserId: principal.userId,
-      expiresAt: new Date(now.getTime() + inviteTtlMs),
-      departments: { create: input.departmentIds.map((departmentId) => ({ collegeId: principal.collegeId, departmentId })) }
+      expiresAt: new Date(now.getTime() + inviteTtlMs)
     }, select: { id: true } });
+    if (input.departmentIds.length) {
+      await tx.staffInvitationDepartment.createMany({ data: input.departmentIds.map((departmentId) => ({ invitationId: id, collegeId: principal.collegeId, departmentId })) });
+    }
     await recordAuditEvent(tx, principal, { action: "staff_invitation.created", entityType: "StaffInvitation", entityId: invitation.id });
   });
   return { invitationUrl: new URL(`/accept-staff-invitation/${token}`, env.APP_URL).toString() };
@@ -145,9 +147,11 @@ export async function resendStaffInvitation(principal: Principal, id: string): P
     await tx.staffInvitation.create({ data: {
       id: newId, collegeId: principal.collegeId, fullName: old.fullName, email: old.email, emailNormalized: old.emailNormalized,
       role: old.role, message: old.message, tokenHash: hashSessionToken(token), issuedByUserId: principal.userId,
-      expiresAt: new Date(now.getTime() + inviteTtlMs),
-      departments: { create: old.departments.map(({ departmentId }) => ({ collegeId: principal.collegeId, departmentId })) }
+      expiresAt: new Date(now.getTime() + inviteTtlMs)
     } });
+    if (old.departments.length) {
+      await tx.staffInvitationDepartment.createMany({ data: old.departments.map(({ departmentId }) => ({ invitationId: newId, collegeId: principal.collegeId, departmentId })) });
+    }
     await recordAuditEvent(tx, principal, { action: "staff_invitation.created", entityType: "StaffInvitation", entityId: newId });
   });
   return { invitationUrl: new URL(`/accept-staff-invitation/${token}`, env.APP_URL).toString() };
@@ -160,10 +164,13 @@ export async function getStaffInvitation(token: string) {
     await tx.$executeRaw`SELECT set_config('app.staff_invitation_token_hash', ${tokenHash}, true)`;
     const invite = await tx.staffInvitation.findUnique({ where: { tokenHash }, select: {
       id: true, collegeId: true, fullName: true, email: true, role: true, message: true, tokenHash: true,
-      expiresAt: true, acceptedAt: true, revokedAt: true, college: { select: { name: true, isActive: true } }
+      expiresAt: true, acceptedAt: true, revokedAt: true
     } });
-    if (!invite || !invite.college.isActive || !verifySessionToken(token, invite.tokenHash) || invite.acceptedAt || invite.revokedAt || invite.expiresAt <= new Date()) return null;
-    return { id: invite.id, collegeId: invite.collegeId, fullName: invite.fullName, email: invite.email, role: invite.role, message: invite.message, collegeName: invite.college.name };
+    if (!invite || !verifySessionToken(token, invite.tokenHash) || invite.acceptedAt || invite.revokedAt || invite.expiresAt <= new Date()) return null;
+    await tx.$executeRaw`SELECT set_config('app.current_tenant_id', ${invite.collegeId}, true)`;
+    const college = await tx.college.findUnique({ where: { id: invite.collegeId }, select: { name: true, isActive: true } });
+    if (!college?.isActive) return null;
+    return { id: invite.id, collegeId: invite.collegeId, fullName: invite.fullName, email: invite.email, role: invite.role, message: invite.message, collegeName: college.name };
   });
 }
 

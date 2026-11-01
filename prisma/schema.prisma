@@ -88,7 +88,9 @@ model College {
   applications     CollegeApplication[]
   adminInvitations CollegeAdminInvitation[]
   staffInvitations StaffInvitation[]
+  studentInvitations StudentInvitation[]
   departments      Department[]
+  documents   StudentDocument[]
 }
 
 model CollegeDomain {
@@ -123,6 +125,8 @@ model User {
   acceptedAdminInvitations    CollegeAdminInvitation[] @relation("InvitationAcceptor")
   issuedStaffInvitations      StaffInvitation[]        @relation("StaffInvitationIssuer")
   acceptedStaffInvitations    StaffInvitation[]        @relation("StaffInvitationAcceptor")
+  issuedStudentInvitations    StudentInvitation[]      @relation("StudentInvitationIssuer")
+  acceptedStudentInvitations  StudentInvitation[]      @relation("StudentInvitationAcceptor")
 }
 
 model CollegeApplication {
@@ -212,6 +216,7 @@ model Department {
   college               College                      @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   assignments           MembershipDepartment[]
   invitationAssignments StaffInvitationDepartment[]
+  studentInvitations    StudentInvitation[]
 
   @@unique([collegeId, name])
   @@unique([collegeId, shortCode])
@@ -255,6 +260,39 @@ model StaffInvitationDepartment {
 
   @@id([invitationId, departmentId])
   @@index([collegeId, departmentId])
+}
+
+model StudentInvitation {
+  id               String    @id @default(uuid()) @db.Uuid
+  collegeId        String    @db.Uuid
+  departmentId     String    @db.Uuid
+  fullName         String
+  email            String
+  emailNormalized  String
+  registerNumber   String
+  batchYear        Int
+  cgpa             Decimal?  @db.Decimal(4, 2)
+  tenthPercentage  Decimal?  @db.Decimal(5, 2)
+  twelfthPercentage Decimal? @db.Decimal(5, 2)
+  standingArrears  Int?
+  historyOfArrears Boolean?
+  tokenHash        String    @unique
+  issuedByUserId   String    @db.Uuid
+  acceptedByUserId String?   @db.Uuid
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  college    College    @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  department Department @relation(fields: [departmentId, collegeId], references: [id, collegeId], onDelete: Restrict)
+  issuedBy   User       @relation("StudentInvitationIssuer", fields: [issuedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy User?      @relation("StudentInvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([collegeId, createdAt])
+  @@index([emailNormalized, expiresAt])
+  @@unique([collegeId, registerNumber])
+  @@unique([id, collegeId])
 }
 
 model RateLimitBucket {
@@ -317,6 +355,7 @@ model StudentProfile {
   membership    Membership       @relation(fields: [membershipId, collegeId], references: [id, collegeId], onDelete: Cascade)
   academics     AcademicRecord[]
   registrations Registration[]
+  documents     StudentDocument[]
 
   @@unique([collegeId, registerNumber])
   @@unique([id, collegeId])
@@ -354,6 +393,35 @@ model AcademicRecord {
   student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@index([studentId, effectiveFrom])
+}
+
+enum StudentDocumentCategory {
+  RESUME
+  ACADEMIC_CERTIFICATE
+  SUPPORTING_DOCUMENT
+}
+
+model StudentDocument {
+  id            String                  @id @default(uuid()) @db.Uuid
+  studentId     String                  @db.Uuid
+  collegeId     String                  @db.Uuid
+  category      StudentDocumentCategory
+  originalName  String
+  storageKey    String                  @unique
+  mimeType      String
+  extension     String
+  sizeBytes     Int
+  sha256        String
+  uploadedById  String                  @db.Uuid
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  student StudentProfile @relation(fields: [studentId, collegeId], references: [id, collegeId], onDelete: Cascade)
+  college College        @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, category])
+  @@unique([id, collegeId])
+  @@index([collegeId, studentId, category])
 }
 
 model Company {

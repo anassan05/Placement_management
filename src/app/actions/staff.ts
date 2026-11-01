@@ -72,7 +72,11 @@ export async function resendStaffInvitationAction(_previous: StaffInvitationActi
 }
 
 export async function acceptStaffInvitationAction(token: string, _previous: { error?: string }, formData: FormData) {
-  const parsed = staffAcceptanceSchema.safeParse(Object.fromEntries(formData));
+  const parsed = staffAcceptanceSchema.safeParse({
+    displayName: formString(formData, "displayName"),
+    password: formString(formData, "password"),
+    confirmPassword: formString(formData, "confirmPassword")
+  });
   if (!parsed.success) return { error: "Enter your invited name and matching password (at least 12 characters)." };
   try {
     const session = await acceptStaffInvitation(token, parsed.data);

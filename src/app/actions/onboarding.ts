@@ -18,7 +18,20 @@ const applyCookie = async (session: { token: string; expiresAt: Date }) => {
 };
 
 export async function applyCollegeAction(formData: FormData) {
-  const parsed = collegeApplicationSchema.safeParse(Object.fromEntries(formData));
+  const parsed = collegeApplicationSchema.safeParse({
+    collegeName: formString(formData, "collegeName"),
+    shortName: formString(formData, "shortName"),
+    websiteUrl: formString(formData, "websiteUrl"),
+    contactEmail: formString(formData, "contactEmail"),
+    contactPhone: formString(formData, "contactPhone"),
+    state: formString(formData, "state"),
+    district: formString(formData, "district"),
+    address: formString(formData, "address"),
+    administratorName: formString(formData, "administratorName"),
+    administratorEmail: formString(formData, "administratorEmail"),
+    message: formString(formData, "message"),
+    companyWebsite: formString(formData, "companyWebsite")
+  });
   if (!parsed.success) redirect("/apply-college?error=invalid");
   try {
     const reference = await submitCollegeApplication(parsed.data);
@@ -76,7 +89,11 @@ export async function logoutAction() {
 }
 
 export async function acceptInvitationAction(token: string, _previous: { error?: string }, formData: FormData) {
-  const parsed = invitationAcceptanceSchema.safeParse(Object.fromEntries(formData));
+  const parsed = invitationAcceptanceSchema.safeParse({
+    email: formString(formData, "email"),
+    displayName: formString(formData, "displayName"),
+    password: formString(formData, "password")
+  });
   if (!parsed.success) return { error: "Enter a valid name, invited email, and password of at least 12 characters." };
   try {
     const session = await acceptCollegeAdminInvitation(token, parsed.data);
@@ -132,5 +149,6 @@ function workspaceForRole(role: string): string {
   if (role === "COLLEGE_ADMIN") return "/college/dashboard";
   if (role === "PLACEMENT_OFFICER") return "/college/placement";
   if (role === "COORDINATOR") return "/college/coordinator";
+  if (role === "STUDENT") return "/college/student-dashboard";
   return "/college/login";
 }
